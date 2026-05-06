@@ -16,7 +16,7 @@
 //
 // 运行方式建议 ./server & 或重定向日志，避免前台升级后 shell 提示符与日志交错。
 //
-// systemd socket activation 示例在并列目录 ../demo-systemd/（仅 systemd，无直接 bind）。
+// systemd socket activation 示例在并列目录 ../demo-systemd/（仅 LISTEN_FDS，无 SIGUSR2）。
 package main
 
 import (

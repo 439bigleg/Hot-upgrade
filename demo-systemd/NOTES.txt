@@ -3,7 +3,7 @@ systemd socket activation 版 demo（独立 Go 模块；与主项目 hotupgrade-
 一、行为
   - 由 .socket 单元在 8085 上 listen；.service 启动时 systemd 设置 LISTEN_FDS / LISTEN_PID，
     程序通过 internal/hotserver 的 systemdListeners() 接管监听。
-  - 非 systemd 启动且非应用内热升级子进程时：进程退出并报错（无直接 bind）。
+  - 非 systemd socket activation 启动时：进程启动失败并报错（无直接 bind、无 SIGUSR2）。
 
 二、Linux 安装示例（需 root）
   1) go build -o hotupgrade-sd-demo .
@@ -19,9 +19,9 @@ systemd socket activation 版 demo（独立 Go 模块；与主项目 hotupgrade-
 
   说明：监听在 socket 单元上保持；restart 会启动新进程并由 systemd 再次传入同一监听 fd。
 
-四、与根目录 SIGUSR2 + exec 方案的关系
-  本 demo 仍保留 SIGUSR2 应用内热升级（同一套 forkUpgrade）；在 systemd 下也可用，
-  但运维上更常见的是 systemctl restart + socket activation。
+四、与 hotupgrade-demo 的关系
+  hotupgrade-demo 为 SIGUSR2 + 子进程继承 fd 的独立示例；本目录仅演示 systemd
+  socket activation + systemctl restart 换二进制，二者不要混为一谈。
 
 五、验证步骤（先旧二进制 → 再换新；socket 不丢）
 
