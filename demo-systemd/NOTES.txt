@@ -1,0 +1,79 @@
+systemd socket activation 版 demo（独立 Go 模块；与主项目 hotupgrade-demo 并列，位于同一上级目录 Cursor/ 下）
+
+一、行为
+  - 由 .socket 单元在 8085 上 listen；.service 启动时 systemd 设置 LISTEN_FDS / LISTEN_PID，
+    程序通过 internal/hotserver 的 systemdListeners() 接管监听。
+  - 非 systemd 启动且非应用内热升级子进程时：进程退出并报错（无直接 bind）。
+
+二、Linux 安装示例（需 root）
+  1) go build -o hotupgrade-sd-demo .
+     （旧逻辑: go build -tags old -o hotupgrade-sd-demo . ）
+  2) sudo install -m 755 hotupgrade-sd-demo /usr/local/bin/hotupgrade-sd-demo
+  3) sudo cp deploy/hotupgrade-sd-demo.socket deploy/hotupgrade-sd-demo.service /etc/systemd/system/
+  4) sudo systemctl daemon-reload
+  5) sudo systemctl enable --now hotupgrade-sd-demo.socket hotupgrade-sd-demo.service
+
+三、热更新（换二进制）
+  sudo ./deploy/upgrade.sh /path/to/new-built-binary
+  或手动: sudo install -m 755 newbin /usr/local/bin/hotupgrade-sd-demo && sudo systemctl restart hotupgrade-sd-demo.service
+
+  说明：监听在 socket 单元上保持；restart 会启动新进程并由 systemd 再次传入同一监听 fd。
+
+四、与根目录 SIGUSR2 + exec 方案的关系
+  本 demo 仍保留 SIGUSR2 应用内热升级（同一套 forkUpgrade）；在 systemd 下也可用，
+  但运维上更常见的是 systemctl restart + socket activation。
+
+五、验证步骤（先旧二进制 → 再换新；socket 不丢）
+
+  约定：旧版响应体为 hello（随机 sleep 1–10s）；新版为 ok（1–5s）。端口 8085。
+
+  A. 准备（在 demo-systemd 源码目录，Linux）
+
+    go build -tags old -o hotupgrade-sd-demo-old .
+    go build -o hotupgrade-sd-demo-new .
+
+  B. 首次安装并启动「旧」服务
+
+    sudo install -m 755 hotupgrade-sd-demo-old /usr/local/bin/hotupgrade-sd-demo
+    sudo cp deploy/hotupgrade-sd-demo.socket deploy/hotupgrade-sd-demo.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now hotupgrade-sd-demo.socket hotupgrade-sd-demo.service
+
+  C. 确认旧版正常（单次请求，需等待最多约 10s）
+
+    curl -sS --max-time 15 http://127.0.0.1:8085/
+    # 期望输出一行: hello
+
+    sudo journalctl -u hotupgrade-sd-demo.service -n 20 --no-pager
+    # 日志里应有 binary profile=old 与 sleep ... (old)
+
+  D. 换「新」二进制（upgrade.sh 会 install + restart service；.socket 保持）
+
+    cd /path/to/demo-systemd
+    sudo ./deploy/upgrade.sh "$(pwd)/hotupgrade-sd-demo-new"
+
+  E. 确认已切到新逻辑
+
+    curl -sS --max-time 10 http://127.0.0.1:8085/
+    # 期望: ok
+
+    sudo journalctl -u hotupgrade-sd-demo.service -n 30 --no-pager
+    # 新进程日志里应有 binary profile=new 与 sleep ... (new)
+
+  F. 「尽量不断服」压测（在另一终端、换二进制前启动）
+
+    # 旧版单次请求最久约 10s，这里 max-time 略宽裕；统计连接/读失败次数
+    fails=0; ok=0; end=$((SECONDS+120)); while [ $SECONDS -lt $end ]; do
+      if out=$(curl -sS --max-time 12 http://127.0.0.1:8085/ 2>/dev/null); then
+        ok=$((ok+1)); printf '%s %s\n' "$out" "$(date +%T)"
+      else
+        fails=$((fails+1)); echo "FAIL $(date +%T)"
+      fi
+      sleep 0.2
+    done; echo "ok=$ok fails=$fails"
+
+    在循环跑着时，另开终端执行 D 步 upgrade.sh。
+    说明：socket 由 systemd 持有，restart 期间新连接一般仍可进入内核队列，
+    不会像「进程自己 listen」那样整段出现 connection refused；但正在旧进程里
+    处理的请求可能被中断，故偶发 curl 失败可接受，重点是对比 fails 是否极少、
+    且换完后响应体变为 ok。

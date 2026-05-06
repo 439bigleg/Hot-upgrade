@@ -1,0 +1,12 @@
+# IDE
+.idea/
+
+# logs / local artifacts
+*.log
+server
+server.new
+server_old
+server_new
+hotupgrade-sd-demo
+hotupgrade-sd-demo-old
+hotupgrade-sd-demo-new

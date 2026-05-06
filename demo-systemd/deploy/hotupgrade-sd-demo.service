@@ -1,0 +1,12 @@
+[Unit]
+Description=Hotupgrade systemd demo HTTP (socket activated)
+Requires=hotupgrade-sd-demo.socket
+After=hotupgrade-sd-demo.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hotupgrade-sd-demo
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
